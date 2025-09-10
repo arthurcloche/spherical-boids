@@ -26,36 +26,39 @@ const radius = 80;
 // Geometry options with metadata
 const geometries = {
   "Torus Knot (2,3)": {
-    create: () => new THREE.TorusKnotGeometry(radius * 0.6, radius * 0.18, 300, 48, 2, 3),
-    smooth: true
+    create: () =>
+      new THREE.TorusKnotGeometry(radius * 0.6, radius * 0.18, 300, 48, 2, 3),
+    smooth: true,
   },
   "Torus Knot (3,2)": {
-    create: () => new THREE.TorusKnotGeometry(radius * 0.6, radius * 0.15, 300, 48, 3, 2),
-    smooth: true
+    create: () =>
+      new THREE.TorusKnotGeometry(radius * 0.6, radius * 0.15, 300, 48, 3, 2),
+    smooth: true,
   },
   "Torus Knot (5,3)": {
-    create: () => new THREE.TorusKnotGeometry(radius * 0.6, radius * 0.12, 300, 48, 5, 3),
-    smooth: true
+    create: () =>
+      new THREE.TorusKnotGeometry(radius * 0.6, radius * 0.12, 300, 48, 5, 3),
+    smooth: true,
   },
-  "Sphere": {
+  Sphere: {
     create: () => new THREE.SphereGeometry(radius, 64, 32),
-    smooth: true
+    smooth: true,
   },
-  "Torus": {
+  Torus: {
     create: () => new THREE.TorusGeometry(radius * 0.7, radius * 0.3, 32, 64),
-    smooth: true
+    smooth: true,
   },
-  "Icosahedron": {
+  Icosahedron: {
     create: () => new THREE.IcosahedronGeometry(radius, 3),
-    smooth: true
+    smooth: true,
   },
-  "Octahedron": {
+  Octahedron: {
     create: () => new THREE.OctahedronGeometry(radius, 3),
-    smooth: true
+    smooth: true,
   },
-  "Dodecahedron": {
+  Dodecahedron: {
     create: () => new THREE.DodecahedronGeometry(radius, 2),
-    smooth: true
+    smooth: true,
   },
   "Smooth Cube": {
     create: () => {
@@ -65,7 +68,7 @@ const geometries = {
       geo.scale(1.0, 0.9, 0.9);
       return geo;
     },
-    smooth: true
+    smooth: true,
   },
   "Rounded Cylinder": {
     create: () => {
@@ -73,16 +76,16 @@ const geometries = {
       const geo = new THREE.CapsuleGeometry(radius * 0.5, radius * 0.8, 20, 32);
       return geo;
     },
-    smooth: true
+    smooth: true,
   },
-  "Ellipsoid": {
+  Ellipsoid: {
     create: () => {
       const geo = new THREE.SphereGeometry(radius, 32, 16);
       geo.scale(1.0, 0.7, 1.3);
       return geo;
     },
-    smooth: true
-  }
+    smooth: true,
+  },
 };
 
 let currentGeometry = "Torus Knot (2,3)";
@@ -128,29 +131,29 @@ function switchGeometry(geometryName) {
   // Remove old mesh and surface
   scene.remove(surfaceMesh);
   if (surface) surface.dispose();
-  
+
   // Remove old boids
   for (let boid of boids) {
     scene.remove(boid.object3D);
   }
-  
+
   // Create new geometry
   currentGeometry = geometryName;
   const geoConfig = geometries[currentGeometry];
   geometry = geoConfig.create();
   geometry.computeBoundingSphere();
-  
+
   surfaceMesh = new THREE.Mesh(geometry, material);
   surfaceMesh.castShadow = false;
   surfaceMesh.receiveShadow = false;
   scene.add(surfaceMesh);
-  
+
   // Create new surface constraint
   surface = new MeshSurfaceConstraint(surfaceMesh);
-  
+
   // Recreate boids
   createBoids();
-  
+
   // Update info display
   updateInfo();
 }
@@ -158,51 +161,55 @@ function switchGeometry(geometryName) {
 function createBoids() {
   boids = [];
   const count = 100;
-  
+
   for (let i = 0; i < count; i++) {
-  const color = i === 0 ? "#dda15e" : "#a3b18a";
-  
-  // Try multiple times to get a valid surface point
-  let hit = null;
-  for (let attempt = 0; attempt < 10; attempt++) {
-    const sampled = samplePointOnMesh(surfaceMesh);
-    if (sampled) {
-      const normal = surface.normalAt(sampled);
-      hit = { point: sampled, normal: normal };
-      break;
+    const color = i === 0 ? "#dda15e" : "#a3b18a";
+
+    // Try multiple times to get a valid surface point
+    let hit = null;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const sampled = samplePointOnMesh(surfaceMesh);
+      if (sampled) {
+        const normal = surface.normalAt(sampled);
+        hit = { point: sampled, normal: normal };
+        break;
+      }
+      // Fallback: try projecting from random point
+      const posGuess = getRandomPointOnUnitSphere().setLength(
+        radius * (0.5 + Math.random())
+      );
+      hit = surface.projectPoint(posGuess, null, 500);
+      if (hit) break;
     }
-    // Fallback: try projecting from random point
-    const posGuess = getRandomPointOnUnitSphere().setLength(radius * (0.5 + Math.random()));
-    hit = surface.projectPoint(posGuess, null, 500);
-    if (hit) break;
+
+    if (!hit) {
+      console.warn(`Failed to find surface for boid ${i}, skipping`);
+      continue;
+    }
+
+    // Add offset from surface for gliding
+    const surfaceOffset = 3.0;
+    const pos = hit.point
+      .clone()
+      .addScaledVector(hit.normal.normalize(), surfaceOffset);
+
+    // Initialize with small random tangent velocity
+    const tangentVel = new THREE.Vector3(
+      Math.random() - 0.5,
+      Math.random() - 0.5,
+      Math.random() - 0.5
+    );
+    // Remove normal component to keep velocity tangent to surface
+    const normalComponent = tangentVel.dot(hit.normal) / hit.normal.lengthSq();
+    tangentVel.addScaledVector(hit.normal, -normalComponent);
+    tangentVel.multiplyScalar(0.1); // Start with small velocity
+
+    const b = new Boid(radius, color, pos, tangentVel, surface);
+    b.up = hit.normal.clone();
+    boids.push(b);
+    scene.add(b.object3D);
   }
-  
-  if (!hit) {
-    console.warn(`Failed to find surface for boid ${i}, skipping`);
-    continue;
-  }
-  
-  // Add offset from surface for gliding
-  const surfaceOffset = 3.0;
-  const pos = hit.point.clone().addScaledVector(hit.normal.normalize(), surfaceOffset);
-  
-  // Initialize with small random tangent velocity
-  const tangentVel = new THREE.Vector3(
-    Math.random() - 0.5,
-    Math.random() - 0.5, 
-    Math.random() - 0.5
-  );
-  // Remove normal component to keep velocity tangent to surface
-  const normalComponent = tangentVel.dot(hit.normal) / hit.normal.lengthSq();
-  tangentVel.addScaledVector(hit.normal, -normalComponent);
-  tangentVel.multiplyScalar(0.1); // Start with small velocity
-  
-  const b = new Boid(radius, color, pos, tangentVel, surface);
-  b.up = hit.normal.clone();
-  boids.push(b);
-  scene.add(b.object3D);
-  }
-  
+
   if (boids.length > 0) {
     boids[0].maxSpeed *= 1.2;
     boids[0].maxSteer *= 1.5;
@@ -216,16 +223,16 @@ createBoids();
 window.addEventListener("resize", onWindowResize, false);
 
 // Create info display
-const infoDiv = document.createElement('div');
-infoDiv.style.position = 'absolute';
-infoDiv.style.top = '10px';
-infoDiv.style.left = '10px';
-infoDiv.style.color = 'white';
-infoDiv.style.fontFamily = 'monospace';
-infoDiv.style.fontSize = '14px';
-infoDiv.style.backgroundColor = 'rgba(0,0,0,0.5)';
-infoDiv.style.padding = '10px';
-infoDiv.style.borderRadius = '5px';
+const infoDiv = document.createElement("div");
+infoDiv.style.position = "absolute";
+infoDiv.style.top = "10px";
+infoDiv.style.left = "10px";
+infoDiv.style.color = "white";
+infoDiv.style.fontFamily = "monospace";
+infoDiv.style.fontSize = "14px";
+infoDiv.style.backgroundColor = "rgba(0,0,0,0.5)";
+infoDiv.style.padding = "10px";
+infoDiv.style.borderRadius = "5px";
 infoDiv.innerHTML = `
   <div>Geometry: ${currentGeometry}</div>
   <div>Behavior: ${behaviors[curr]}</div>
@@ -253,50 +260,50 @@ const geometryKeys = Object.keys(geometries);
 let currentGeometryIndex = 0;
 
 window.addEventListener("keydown", (event) => {
-  switch(event.key) {
-    case ' ':
+  switch (event.key) {
+    case " ":
       // Space - cycle behaviors
       event.preventDefault();
       curr = (curr + 1) % behaviors.length;
       console.log(`Behavior: ${behaviors[curr]}`);
       updateInfo();
       break;
-    case 'g':
-    case 'G':
+    case "g":
+    case "G":
       // Cycle through geometries
       currentGeometryIndex = (currentGeometryIndex + 1) % geometryKeys.length;
       const newGeometry = geometryKeys[currentGeometryIndex];
       console.log(`Switching to: ${newGeometry}`);
       switchGeometry(newGeometry);
       break;
-    case '1':
+    case "1":
       switchGeometry("Sphere");
       break;
-    case '2':
+    case "2":
       switchGeometry("Torus");
       break;
-    case '3':
+    case "3":
       switchGeometry("Torus Knot (2,3)");
       break;
-    case '4':
+    case "4":
       switchGeometry("Torus Knot (3,2)");
       break;
-    case '5':
+    case "5":
       switchGeometry("Torus Knot (5,3)");
       break;
-    case '6':
+    case "6":
       switchGeometry("Icosahedron");
       break;
-    case '7':
+    case "7":
       switchGeometry("Octahedron");
       break;
-    case '8':
+    case "8":
       switchGeometry("Smooth Cube");
       break;
-    case '9':
+    case "9":
       switchGeometry("Ellipsoid");
       break;
-    case '0':
+    case "0":
       switchGeometry("Rounded Cylinder");
       break;
   }
@@ -326,7 +333,7 @@ function update() {
 
     // Apply basic separation
     b.separate(boids, { intensity: 1.0, radius: 15 });
-    
+
     switch (behaviors[curr]) {
       default:
       case "wander": {
@@ -367,27 +374,7 @@ function update() {
   }
 }
 
-function makeUI() {
-  const uiContainer = document.querySelector(".ui");
-  const label = document.querySelector("label");
-  const select = document.createElement("select");
-
-  behaviors.forEach((behavior, index) => {
-    const option = document.createElement("option");
-    option.value = index;
-    option.textContent = behavior;
-    select.appendChild(option);
-  });
-
-  uiContainer.replaceChild(select, document.querySelector("button"));
-
-  select.addEventListener("change", (event) => {
-    curr = parseInt(event.target.value);
-  });
-}
-
 function draw() {
   renderer.render(scene, camera);
 }
-makeUI();
 animate();
